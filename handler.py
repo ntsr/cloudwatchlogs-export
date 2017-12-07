@@ -161,7 +161,7 @@ def create_export_task():
     messages = queue.dequeue()
     if len(messages) == 0:
         LOG.warning('no message!')
-        return
+        raise Exception('no message!')
 
     message = messages[0]
 

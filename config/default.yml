@@ -1,0 +1,6 @@
+config:
+  serviceName: cloudwatchlogs-export
+  stage: dev
+  region: AWS_REGION
+  accountId: AWS_ACCOUNT_ID
+  profile: AWS_DEFAULT_PROFILE

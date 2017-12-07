@@ -1,0 +1,21 @@
+{
+  "name": "admin-cloudwatchlogs-export",
+  "version": "1.0.0",
+  "main": "app.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "deploy": "serverless deploy -v",
+    "remove": "serverless remove -v",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "ntsr",
+  "license": "ISC",
+  "dependencies": {
+    "config": "1.28.1",
+    "serverless": "1.24.0"
+  },
+  "devDependencies": {},
+  "description": ""
+}

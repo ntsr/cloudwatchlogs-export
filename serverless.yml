@@ -1,0 +1,148 @@
+service: ${file(./app.js):constants.ServiceName}
+
+provider:
+  name: aws
+  runtime: python3.6
+  memorySize: 128
+  timeout: 10
+  stage: ${file(./app.js):constants.DeployStage}
+  region: ${file(./app.js):constants.AwsRegion}
+  profile: ${file(./app.js):constants.AwsProfile}
+  # thx. https://hackernoon.com/mind-the-75gb-limit-on-aws-lambda-deployment-packages-163b93c8eb72
+  versionFunctions: false
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - logs:DescribeLogGroups
+        - logs:CreateExportTask
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - sqs:*
+      Resource:
+        Fn::GetAtt:
+          - LogExportTaskQueue
+          - Arn
+    - Effect: Allow
+      Action:
+        - states:StartExecution
+      Resource: "*"
+
+  environment:
+    LOG_BUCKET_NAME:
+      Ref: LogBucket
+    SFN_ARN:
+      Ref: LogExportTaskSfn
+    SQS_NAME:
+      Fn::GetAtt:
+        - LogExportTaskQueue
+        - QueueName
+    LOG_LEVEL: ${file(./app.js):constants.LogLevel}
+    API_VERSION: ${file(./app.js):constants.ApiVersion}
+
+package:
+  exclude:
+    - node_modules/**
+    - test/**
+    - '*.log'
+    - app.js
+    - config/**
+    - package.json
+    - .git/**
+
+functions:
+  LaunchFunctions:
+    handler: handler.handle_launchFunctions
+    events:
+      - schedule: cron(0 0 * * ? *)
+  sfnEnqueue:
+    handler: handler.handle_sfnEnqueue
+  sfnCreateExportTask:
+    handler: handler.handle_sfnCreateExportTask
+  sfnGetQueueStatus:
+    handler: handler.handle_sfnGetQueueStatus
+  sfnFinalTask:
+    handler: handler.handle_sfnFinalTask
+
+resources:
+  Resources:
+    LogBucket:
+      Type: AWS::S3::Bucket
+    LogBucketUploadPolicy:
+      Type: AWS::S3::BucketPolicy
+      DependsOn: LogBucket
+      Properties:
+        Bucket:
+          Ref: LogBucket
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Action: "s3:GetBucketAcl"
+              Effect: Allow
+              Resource:
+                Fn::Join:
+                  - ""
+                  -
+                    - "arn:aws:s3:::"
+                    -
+                      Ref: "LogBucket"
+              Principal:
+                Service: "logs.${self:provider.region}.amazonaws.com"
+            - Action: "s3:PutObject"
+              Effect: Allow
+              Resource:
+                Fn::Join:
+                  - ""
+                  -
+                    - "arn:aws:s3:::"
+                    -
+                      Ref: "LogBucket"
+                    - "/*"
+              Condition:
+                StringEquals:
+                  s3:x-amz-acl: "bucket-owner-full-control"
+              Principal:
+                Service: "logs.${self:provider.region}.amazonaws.com"
+    LogExportTaskQueue:
+      Type: AWS::SQS::Queue
+    LogExportTaskIAMRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Effect: "Allow"
+              Principal:
+                Service:
+                  - "states.${self:provider.region}.amazonaws.com"
+              Action:
+                - "sts:AssumeRole"
+        Path: /service-role/
+        Policies:
+          - PolicyName: SfnLambdaPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                -
+                  Effect: "Allow"
+                  Action: "lambda:InvokeFunction"
+                  Resource:
+                    Fn::Join:
+                      - ":"
+                      - - arn:aws:lambda
+                        - ${self:provider.region}
+                        - ${file(./app.js):constants.AwsAccountId}
+                        - function
+                        - ${self:service}-${self:provider.stage}-sfn*
+    LogExportTaskSfn:
+      Type: AWS::StepFunctions::StateMachine
+      DependsOn: LogExportTaskIAMRole
+      Properties:
+        RoleArn:
+          Fn::Join:
+            - ""
+            - - arn:aws:iam::${file(./app.js):constants.AwsAccountId}:role/service-role/
+              - Ref: LogExportTaskIAMRole
+        DefinitionString: ${file(stepfunction.js):definition}
